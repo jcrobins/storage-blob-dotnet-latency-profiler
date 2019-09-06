@@ -97,7 +97,7 @@ The size (in bytes) of each blob to upload.  This must be between 0 and the maxi
 
 ##### Example
 ```
-dotnet run testcontainer storageacc ./results.csv prod true **UploadTestBlobs testblob- 1000000 4194304**
+dotnet run testcontainer storageacc ./results.csv prod true UploadTestBlobs testblob- 1000000 4194304
 ```
 The application will upload 1,000,000 4MiB blobs named **testblob-0** through **testblob-999999** to the storage account identified in the environment variable **storageacc** using the SAS token in environment variable **storageaccSas**.  The storage account is housed in a production tenant and we're configured to use HTTPS.  Output is written to ./results.csv (though no performance is tracked).
 
@@ -118,7 +118,7 @@ The percentile to track for perf status updates to the console.  99 = 99%, 99.9 
 
 ##### Example
 ```
-dotnet run testcontainer storageacc ./results.csv prod true **PutBlobTest testblob- 1000000 4194304 100 99**
+dotnet run testcontainer storageacc ./results.csv prod true PutBlobTest testblob- 1000000 4194304 100 99
 ```
 The application will upload 1,000,000 4MiB blobs named **testblob-0** through **testblob-999999** to the storage account identified in the environment variable **storageacc** using the SAS token in environment variable **storageaccSas**.  The storage account is housed in a production tenant and we're configured to use HTTPS.  Output is written to ./results.csv with the latency of each blob upload.  The total average and 99th percentile latencies are reported after every 100 blobs.
 
@@ -139,7 +139,7 @@ The percentile to track for perf status updates to the console.  99 = 99%, 99.9 
 
 ##### Example
 ```
-dotnet run testcontainer storageacc ./results.csv prod true **PutBlockTest testblob- 1000000 4194304 100 99**
+dotnet run testcontainer storageacc ./results.csv prod true PutBlockTest testblob- 1000000 4194304 100 99
 ```
 The application will upload 100,000 4MiB blocks to **testblob-0** and 10,000 4MiB blocks to **testblob-1** to the storage account identified in the environment variable **storageacc** using the SAS token in environment variable **storageaccSas**.  The storage account is housed in a production tenant and we're configured to use HTTPS.  Output is written to ./results.csv with the latency of each block upload.  The total average and 99th percentile latencies are reported after every 100 blocks.
 
@@ -162,7 +162,7 @@ The percentile to track for perf status updates to the console.  99 = 99%, 99.9 
 
 ##### Example
 ```
-dotnet run testcontainer storageacc ./results.csv prod true **RandomDownloadTest testblob- 100000 65536 1000000 100 99**
+dotnet run testcontainer storageacc ./results.csv prod true RandomDownloadTest testblob- 100000 65536 1000000 100 99
 ```
 The application will download the first 64KiB of 100,000 blobs randomly chosen out of an available set of 1,000,000 (named **testblob-0** through **testblob-999999**) from the storage account identified in the environment variable **storageacc** using the SAS token in environment variable **storageaccSas**.  The storage account is housed in a production tenant and we're configured to use HTTPS.  Output is written to ./results.csv with the latency of each block upload.  The total average and 99th percentile latencies are reported after every 100 blobs.
 
@@ -181,7 +181,7 @@ The percentile to track for perf status updates to the console.  99 = 99%, 99.9 
 
 ##### Example
 ```
-dotnet run testcontainer storageacc ./results.csv prod true **ListBlobsTest testblob- 1000 100 99**
+dotnet run testcontainer storageacc ./results.csv prod true ListBlobsTest testblob- 1000 100 99
 ```
 The application will perform 1,000 list oeprations against **testcontainer** for blobs prefixed with **testblob-** in the storage account identified in the environment variable **storageacc** using the SAS token in environment variable **storageaccSas**.  The storage account is housed in a production tenant and we're configured to use HTTPS.  Output is written to ./results.csv with the latency of each block upload.  The total average and 99th percentile latencies are reported after every 100 list operations.
 
