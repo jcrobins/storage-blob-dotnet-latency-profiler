@@ -468,14 +468,10 @@ namespace Sample_HighThroughputBlobUpload
 
         private async Task<DownloadTestDataEntry> UploadBlobAsync(byte[] buffer, CloudBlockBlob cbb)
         {
-
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
             await cbb.UploadFromByteArrayAsync(buffer, 0, buffer.Length);
             stopwatch.Stop();
-            await cbb.FetchAttributesAsync();
-            AccountProperties properties = await cbb.GetAccountPropertiesAsync();
-
 
             return new DownloadTestDataEntry(stopwatch.Elapsed, cbb.Container.Name, cbb.Name);
         }
@@ -978,7 +974,6 @@ namespace Sample_HighThroughputBlobUpload
 
     class Program
     {
-
         static CloudStorageAccount GetStorageAccount(
             string storageAccountNameEnvVar,
             string storageAccountSasEnvVar,
@@ -1070,7 +1065,7 @@ namespace Sample_HighThroughputBlobUpload
                 // Run the test on the managed thread pool.
                 Task testTask = Task.Run(async () => { await test.Run(); });
 
-                Console.WriteLine($"Test operation complete.  Dumping details to output file '{outputFilePath}'.");
+                Console.WriteLine($"Test running.  Streaming details to output file '{outputFilePath}'.");
 
                 // Flush the logs once per second to file until the test is complete.
                 using (FileStream filestream = new FileStream(outputFilePath, FileMode.CreateNew, FileAccess.Write))
@@ -1088,6 +1083,11 @@ namespace Sample_HighThroughputBlobUpload
 
                             await Task.WhenAll(reportingTasks);
                         }).Wait();
+                    }
+
+                    if (testTask.IsFaulted)
+                    {
+                        throw testTask.Exception;
                     }
 
                     // One last flush to capture any final logs.

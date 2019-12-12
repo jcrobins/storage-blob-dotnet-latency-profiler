@@ -5,7 +5,7 @@ The functions provided by test tool are:
 1. **UploadTestBlobs** Concurrently uploads blobs for use by read-oriented tests.
 2. **PutBlobTest** Issues PutBlob operations of a set size.  The latency of each operation is recorded for further analysis.
 3. **PutBlockTest** Issues PutBlock operations of a set size.  The latency of each operation is recorded for further analaysis.
-4. **RandownDownloadTest** Issues download operations against randomly-chosen blobs to simulate production workflows where reads are non-sequential.  The latency of each operation is recorded for further analysis.
+4. **RandomDownloadTest** Issues download operations against randomly-chosen blobs to simulate production workflows where reads are non-sequential.  The latency of each operation is recorded for further analysis.
 5. **ListBlobsTest** Issues list operations against a set of existing blobs.  The latency of each operation is recorded for further analaysis.
 
 ## Prerequisites
@@ -37,8 +37,26 @@ First, create a new general-purpose storage account to use for this quickstart.
 
 After your storage account is created, it is pinned to the dashboard. Click on it to open it. Under **Settings**, click **Access keys**. Select the primary key and copy the associated **Connection string** to the clipboard, then paste it into a text editor for later use.  Note that we are directly using storage account keys in this example for the sake of simplicity.  It is highly recommended to use another means to authenticate with the storage service in production environments.
 
-## Put the connection string in an environment variable
+## Put the connection details into an environment variable.
 
+This project requires that either a string or storage account and SAS token with read/write priviliges on the account are stored in environment variables on the local machine prior to running the test.
+
+### Configure to use a Conenction String
+
+Follow one of the examples below depending on your Operating System to create the environment variable. If using windows close out of your open IDE or shell and restart it to be able to read the environment variable.
+
+#### Linux
+
+```bash
+export connectionString = "<your connection string>"
+```
+#### Windows
+
+```cmd
+setx connectionString "<your connection string>"
+```
+
+### Configure to use a SAS Token
 This project requires that the storage account and a SAS token with read/write priviliges on the account are stored in environment variables securely on the machine running the test.
 
 | Name         | Description                                                |
@@ -48,20 +66,20 @@ This project requires that the storage account and a SAS token with read/write p
 
 Follow one of the examples below depending on your Operating System to create the environment variable. If using windows close out of your open IDE or shell and restart it to be able to read the environment variable.
 
-### Linux
+#### Linux
 
 ```bash
 export storageAcc = "<your storage account name>"
 export storageAccSas = "<your storage account's SAS token>"
 ```
-### Windows
+#### Windows
 
 ```cmd
 setx storageAcc "<your storage account name>"
 setx storstorageAccSasageAcc "<your storage account's SAS token>"
 ```
 
-At this point, you can run this application.
+Note that the SAS token should not be prefixed with a "?".
 
 ## Running the application
 
@@ -72,7 +90,7 @@ To run the command, navigate to the base directory of the repository and run `do
 - `arg0: Container Name`
 Specifies the name of the container to be used.
 - `arg1: Storage Account Name Environment Variable`
-The name of the environment variable containing the name of the storage account to be used.  Note: The SAS token must be specified in a second variable with the same name followed by a 'Sas' suffix.
+The name of the environment variable containing the name of the storage account to be used (or the connection string if applicable).  Note: If a storage account name is provided here, the SAS token must be specified in a second variable with the same name followed by a 'Sas' suffix.  No SAS token is required if using a connection string.
 - `arg2: Output File Path`
 The path to the output file.  The output will be in a CSV format.
 - `arg3: Environment` (prod|preprod|test)
