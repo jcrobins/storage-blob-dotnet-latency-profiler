@@ -33,6 +33,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Timers;
 
 
 namespace Sample_HighThroughputBlobUpload
@@ -536,18 +537,30 @@ namespace Sample_HighThroughputBlobUpload
              string[] testArgs) :
             base(testReporter, storageAccount, container)
         {
-            if (!ParseArguments(testArgs, out string blobPrefix, out ulong nBlobsToUpload, out ulong blobSizeBytes))
+            if (!ParseArguments(testArgs,
+                                out string blobPrefix,
+                                out ulong nBlobsToUpload,
+                                out ulong blobSizeBytes,
+                                out ulong numFolders))
             {
                 throw new ArgumentException("The provided parameters were incorrect.");
+            }
+            else if ((NumFolders > 0) &&
+                     ((NBlobsToUpload % NumFolders) != 0))
+            {
+                throw new Exception("Number of files must be evenly distributed over the folders.");
             }
 
             BlobPrefix = blobPrefix;
             NBlobsToUpload = nBlobsToUpload;
             BlobSizeBytes = blobSizeBytes;
+            NumFolders = numFolders;
         }
 
         protected override async Task RunInternal()
         {
+            Stopwatch stopwatch = new Stopwatch();
+            stopwatch.Start();
             await Container.CreateIfNotExistsAsync();
 
             const ulong MAX_BLOCK_SIZE = 100 * 1024 * 1024;
@@ -557,37 +570,169 @@ namespace Sample_HighThroughputBlobUpload
             byte[] buffer = new byte[uploadUnitBytes];
             new Random().NextBytes(buffer);
 
+            // Timer to display progress.
+            var timer = new System.Timers.Timer(1000);
+            timer.Elapsed += Timer_Elapsed;
+            timer.AutoReset = true;
+            timer.Enabled = true;
+
             SemaphoreSlim sem = new SemaphoreSlim(100, 100);
-            List<Task> tasks = new List<Task>();
+            ConcurrentBag<Task> tasks = new ConcurrentBag<Task>();
 
-            for (ulong i = 0; i < NBlobsToUpload; ++i)
+            if (NumFolders <= 0)
             {
-                string blobName = BlobPrefix + i;
-                CloudBlockBlob blob = Container.GetBlockBlobReference(blobName);
+                Console.WriteLine("Generating {0} blobs in root folder of container...", NBlobsToUpload);
+                timer.Start();
 
-                await sem.WaitAsync();
-                tasks.Add(UploadBlobAsync(blob, buffer, BlobSizeBytes).ContinueWith((t) =>
+                for (ulong i = 0; i < NBlobsToUpload; ++i)
                 {
-                    if (t.IsCompletedSuccessfully)
+                    string blobName = BlobPrefix + i;
+                    CloudBlockBlob blob = Container.GetBlockBlobReference(blobName);
+                    // Make the owner and group "not-root".
+                    blob.Metadata["owner"] = "1";
+                    blob.Metadata["group"] = "1";
+
+                    await sem.WaitAsync();
+                    tasks.Add(UploadBlobAsync(blob, buffer, BlobSizeBytes).ContinueWith((t) =>
                     {
-                        Console.WriteLine($"Blob {blobName} uploaded.");
-                        sem.Release();
-                    }
-                    else
+                        if (t.IsCompletedSuccessfully)
+                        {
+                            sem.Release();
+                        }
+                        else
+                        {
+                            Console.WriteLine($"UploadBlobAsync for blob {blobName} failed.");
+                            throw t.Exception;
+                        }
+                        Interlocked.Increment(ref m_generatedSoFar);
+                    }));
+                }
+            }
+            else
+            {
+                // Figure out how many folders we have to work with, and do the math
+                // to space out the items over those folders.
+                var numBlobsPerFolder = (ulong)(NBlobsToUpload / NumFolders);
+                Console.WriteLine("Generating {0} blobs in {1} folders ({2} blobs per folder)...", NBlobsToUpload, NumFolders, numBlobsPerFolder);
+                timer.Start();
+
+                for (ulong f = 0; f < NumFolders; ++f)
+                {
+                    string folderName = BlobPrefix + "Folder" + f;
+                    var folder = Container.GetDirectoryReference(folderName);
+
+                    for (ulong i = 0; i < numBlobsPerFolder; ++i)
                     {
-                        Console.WriteLine($"UploadBlobAsync for blob {blobName} failed.");
-                        throw t.Exception;
+                        string blobName = BlobPrefix + i;
+                        CloudBlockBlob blob = folder.GetBlockBlobReference(blobName);
+                        // Make the owner and group "not-root".
+                        blob.Metadata["owner"] = "1";
+                        blob.Metadata["group"] = "1";
+
+                        await sem.WaitAsync();
+                        tasks.Add(UploadBlobAsync(blob, buffer, BlobSizeBytes).ContinueWith((t) =>
+                        {
+                            if (t.IsCompletedSuccessfully)
+                            {
+                                sem.Release();
+                            }
+                            else
+                            {
+                                Console.WriteLine($"UploadBlobAsync for blob {blobName} failed.");
+                                throw t.Exception;
+                            }
+                            Interlocked.Increment(ref m_generatedSoFar);
+                        }));
                     }
-                }));
+                }
             }
 
             // Wait for all blobs to successfully upload.
             await Task.WhenAll(tasks);
+
+            timer.Stop();
+            timer.Dispose();
+            Console.WriteLine("\rGenerated {0} of {1} blobs in {2} mSec", Interlocked.Read(ref m_generatedSoFar), NBlobsToUpload, stopwatch.ElapsedMilliseconds);
+
+            // List the blobs to be sure we got them all.
+            Console.WriteLine("Trying to read {0} blobs...", m_generatedSoFar);
+            stopwatch.Restart();
+            var numRead = await ReadAllBlobs();
+            Console.WriteLine("\rRead {0} blobs in {1} mSec", numRead, stopwatch.ElapsedMilliseconds);
+        }
+
+        private async Task<long> ReadAllBlobs()
+        {
+            BlobContinuationToken blobContinuationToken = null;
+            CancellationToken ct = new CancellationToken(); // Not used, but required.
+            List<Task> tasks = new List<Task>();
+
+            // Timer to display progress.
+            var timer = new System.Timers.Timer(1000);
+            timer.Elapsed += Timer_Elapsed_BlobCount;
+            timer.AutoReset = true;
+            timer.Enabled = true;
+
+            do
+            {
+                var results = await Container.ListBlobsSegmentedAsync(null, true, BlobListingDetails.All, null, blobContinuationToken, null, null, ct);
+
+                // There's a lot of mayhem in this.
+                // Use Task.Run with a lambda that wraps the slow enumerable counting.
+                // Chain a completion callback (the lambda provided to ContinueWith) to
+                // the result of that.
+                // Stuff the result of that computation chain into the tasks list.
+                tasks.Add(Task.Run(() => CountBlobs(results.Results)).ContinueWith((t) =>
+                {
+                    if (!t.IsCompletedSuccessfully)
+                    {
+                        Console.WriteLine($"Reading of blob failed.");
+                        throw t.Exception;
+                    }
+                    Interlocked.Add(ref m_blobsReadSoFar, t.Result);
+                }));
+                // Get the value of the continuation token returned by the listing call.
+                blobContinuationToken = results.ContinuationToken;
+                
+            } while (blobContinuationToken != null); // Loop while the continuation token is not null.
+
+            // Wait for all counting to finish.
+            await Task.WhenAll(tasks);
+
+            timer.Stop();
+            timer.Dispose();
+
+            return m_blobsReadSoFar;
+        }
+
+        private long CountBlobs(IEnumerable<IListBlobItem> collection)
+        {
+            long count = 0;
+
+            foreach (IListBlobItem item in collection)
+            {
+                ++count;
+            }
+            
+            return count;
+        }
+
+        private void Timer_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            Console.Write("\rGenerated {0} of {1}", Interlocked.Read(ref m_generatedSoFar), NBlobsToUpload);
+        }
+
+        private void Timer_Elapsed_BlobCount(object sender, ElapsedEventArgs e)
+        {
+            Console.Write("\rRead {0} of {1}", Interlocked.Read(ref m_blobsReadSoFar), m_generatedSoFar);
         }
 
         private string BlobPrefix { get; }
         private ulong NBlobsToUpload { get; }
         private ulong BlobSizeBytes { get; }
+        private ulong NumFolders { get; }
+        private long m_generatedSoFar = 0;
+        private long m_blobsReadSoFar = 0;
 
         private async Task UploadBlobAsync (CloudBlockBlob blob, byte[] buffer, ulong blobSizeBytes)
         {
@@ -651,12 +796,17 @@ namespace Sample_HighThroughputBlobUpload
             await blob.PutBlockListAsync(blockList);
         }
 
-        private bool ParseArguments(string[] args, out string blobPrefix, out ulong nBlobsToUpload, out ulong blobSizeBytes)
+        private bool ParseArguments(string[] args,
+                                    out string blobPrefix,
+                                    out ulong nBlobsToUpload,
+                                    out ulong blobSizeBytes,
+                                    out ulong numFolders)
         {
             bool isValid = true;
             blobPrefix = "";
             nBlobsToUpload = 0;
             blobSizeBytes = 0;
+            numFolders = 0;
 
             const ulong BLOCK_SIZE_LIMIT = 100 * 1024 * 1024;
             const uint BLOCK_COUNT_LIMIT = 50000;
@@ -668,6 +818,7 @@ namespace Sample_HighThroughputBlobUpload
                     blobPrefix = args[0];
                     nBlobsToUpload = Convert.ToUInt64(args[1]);
                     blobSizeBytes = Convert.ToUInt64(args[2]);
+                    numFolders = Convert.ToUInt64(args[3]);
                 }
                 else
                 {
@@ -688,7 +839,7 @@ namespace Sample_HighThroughputBlobUpload
 
             if (!isValid)
             {
-                Console.WriteLine("Invalid Arguments Provided to UploadTestBlobs.  Expected Arguments: [0]:blobPrefix [1]:nBlobsToUpload [2]:blobSizeBytes");
+                Console.WriteLine("Invalid Arguments Provided to UploadTestBlobs.  Expected Arguments: [0]:blobPrefix [1]:nBlobsToUpload [2]:blobSizeBytes [3]:numFolders");
             }
 
             return isValid;
